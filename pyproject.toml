@@ -11,3 +11,8 @@ authors = [
 description = "A SDMX reader package"
 readme = "README.md"
 requires-python = ">=3.7"
+
+dependencies = [
+  "pandas==2",
+  "requests==2",
+]
