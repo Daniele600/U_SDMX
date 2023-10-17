@@ -2,6 +2,17 @@ import pandas as pd
 
 KEY_OBS_VALUE = "OBS_VALUE"
 
+def parse_data_query(dq: str) -> list:
+    if dq is None:
+        return []
+    dq = dq.strip()
+    ret = dq.split(".")
+    for i in range(len(ret)):
+        ret[i] = ret[i].split("+")
+        ret[i] = [c for c in ret[i] if c!=""]
+
+    return ret
+
 def _parse_data_sdmx_json(jdata: dict, labels="both") -> pd.DataFrame:
     series = jdata["data"]["dataSets"][0]["series"]
     struct = jdata["data"]["structure"]
