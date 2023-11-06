@@ -1,2 +1,2 @@
-pandas==2
+pandas==2.*
 requests_cache=1.1
