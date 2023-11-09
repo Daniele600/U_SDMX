@@ -1,2 +1,4 @@
-pandas==1-3.*
-requests_cache=1.1
+pandas==1.3.*
+requests_cache==1.1
+
+SDMXthon==2.4

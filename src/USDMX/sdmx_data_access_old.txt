@@ -2,35 +2,32 @@ from typing import Union
 import time
 import pandas as pd
 import requests_cache
-import sdmxthon
 
 from .sdmx_parser import _parse_data_sdmx_json
 
 # 5 minutes
 _CACHE_EXPIRE_AFTER_N_SECONDS = 5 * 60
 
-
-
-def  _component_to_dict(component_id, component,lang) -> dict:
-    ret = {"id": component_id, "name": str(component.concept_identity.name)}
-
-    if component.local_representation is not None and component.local_representation.codelist is not None:
-        cl_items = component.local_representation.codelist.items
-        ret["codes"]=[]
-        for code in cl_items:
-            if isinstance(cl_items[code].name, dict):
-                ret["codes"].append({"id":code, "name":cl_items[code].name[lang]["content"]})
-            else:
-                ret["codes"].append({"id":code, "name":cl_items[code].name})
-            if cl_items[code].parent is not None:
-                if isinstance(cl_items[code].parent,str):
-                    ret["codes"][-1]["parent"]=cl_items[code].parent
-                else:
-                    ret["codes"][-1]["parent"]=cl_items[code].parent.id
-
-
+# dsd query, parsing helpers
+def _code_to_dict(code: psdmx.model.Code) -> dict:
+    ret = {"id": code.id, "name": str(code.name)}
+    if isinstance(code.parent, psdmx.model.Code):
+        ret["parent"] = str(code.parent)
     return ret
-    
+
+
+def _component_to_dict(comp) -> dict:
+    ret = {"id": comp.id, "name": str(comp.concept_identity.name), "is_time": False}
+    if (
+        not comp.local_representation is None
+        and not comp.local_representation.enumerated is None
+    ):
+        codes = comp.local_representation.enumerated
+        ret["codes"] = [_code_to_dict(codes[c]) for c in codes.items]
+
+    if isinstance(comp, psdmx.model.TimeDimension):
+        ret["is_time"] = True
+    return ret
 
 
 class SDMX_DataAccess:
@@ -58,44 +55,48 @@ class SDMX_DataAccess:
 
     def get_dataflow_info(self, agency: str, id: str, ver: str, lang: str, print_stats=False )->dict:
         
-        ret ={"name":"", "dsd":{}}
+        ret = {"name":"", "dsd":{}}
         # API call params
-        params = "?detail=full&references=all"
+        params = {"format": "sdmx-json", "detail":"full","references":"children"}
         # build the API call
-        url = f"{self.sdmx_endpoint_url}dataflow/{agency}/{id}/{ver}/{params}"
-        df_id = f"{agency}:{id}({ver})"
+        url = f"{self.sdmx_endpoint_url}dataflow/{agency}/{id}/{ver}/"
 
-        sdmx_msg = None
+        # add some caching
+        session = requests_cache.CachedSession(
+            "data_cache", expire_after=_CACHE_EXPIRE_AFTER_N_SECONDS
+        )
 
-        try:
-            sdmx_msg = sdmxthon.read_sdmx(url)
-        except:
-            raise (                ConnectionError(                    "Error downloading "+ url                )            )
+        r = session.get(url, params=params)
+
+        if r.ok:
+            jdata = r.json()
+        else:
+            raise (
+                ConnectionError(
+                    "Error downloading "
+                    + url
+                    + " status code: "
+                    + str(r.status_code)
+                    + r.raise_for_status()
+                )
+            )
         
-        df_content = sdmx_msg.content["Dataflows"][df_id]
-        ret["name"] = df_content.name
+        dsd = jdata["data"]["dataStructures"][0]
+        dsd_dims = dsd["dataStructureComponents"]["dimensionList"]["dimensions"]
+        dsd_time_dim = dsd["dataStructureComponents"]["dimensionList"]["timeDimensions"]
+        dsd_attribs = dsd["dataStructureComponents"]["attributeList"]["attributes"]
+        dsd_measures = dsd["dataStructureComponents"]["measureList"]["primaryMeasure"]
+        
+        ret["name"] = jdata["data"]["dataflows"][0]["name"]
 
-        ret["dsd"]["dims"] = []
-        sdmx_dims = df_content.structure.content["dimensions"]
 
-        for dim_id in sdmx_dims:
-             ret["dsd"]["dims"].append(_component_to_dict(dim_id,sdmx_dims[dim_id],lang))
-             if dim_id =="TIME_PERIOD":
-                 ret["dsd"]["dims"][-1]["is_time"]=True
-             else:
-                 ret["dsd"]["dims"][-1]["is_time"]=False
 
-        ret["dsd"]["attribs"] = []
-        sdmx_attribs = df_content.structure.content["attributes"]
-        for attr_id in sdmx_attribs:
-             ret["dsd"]["attribs"].append(_component_to_dict(attr_id,sdmx_attribs[attr_id], lang))
-
-        ret["dsd"]["measures"] = []
-        sdmx_measure = df_content.structure.content["measure"]
-        ret["dsd"]["measures"].append(_component_to_dict(sdmx_measure.id, sdmx_measure, lang))
+        ret["dsd"]["dims"] = [_component_to_dict(c) for c in dsd_dims]
+        ret["dsd"]["attribs"] = [_component_to_dict(c) for c in attribs]
+        ret["dsd"]["measures"] = [_component_to_dict(c) for c in measures]
 
         
-        return ret
+        print(ret)
 
 
 
